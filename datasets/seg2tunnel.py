@@ -76,7 +76,11 @@ class Seg2TunnelDataset(DefaultDataset_new):
         # ==========================================
 
         coord = data[:, :3].astype(np.float32)
-        strength = data[:, 3:4].astype(np.float32)  # Extracted as (N, 1) for 1-channel feature backbone
+        
+        # [FIX 1]: Cleaned up intensity duplication logic
+        raw_intensity = data[:, 3:4].astype(np.float32)
+        strength = np.repeat(raw_intensity, 3, axis=1) # Now shape is (N, 3) 
+        
         segment = data[:, 4].astype(np.int32)       
         instance = segment.copy() # Treating semantic class essentially as instance for masking logic
         
@@ -84,6 +88,7 @@ class Seg2TunnelDataset(DefaultDataset_new):
         data_dict = dict(
             coord=coord,
             strength=strength,
+            feat=strength,
             segment=segment,
             instance=instance,
             condition="Seg2Tunnel",  # Ensures correct task mapping in SNAP
@@ -182,6 +187,7 @@ class Seg2TunnelDataset(DefaultDataset_new):
             coord=coord, 
             grid_coord=grid_coord, 
             strength=strength, 
+            feat=strength,  # [FIX 2]: CRITICAL - Feeds the 3-channel intensity to the network
             point=torch.from_numpy(prompt_points).float(), 
             condition=condition, 
             domain=domain,

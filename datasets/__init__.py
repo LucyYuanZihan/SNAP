@@ -15,6 +15,7 @@ from .matterport import Matterport3DDataset
 from .urbanbis import UrbanBISDataset
 from .kitti360_ss import KITTI360_SSDataset
 from .waymo import WaymoDataset
+from .seg2tunnel import Seg2TunnelDataset
 
 
 def build_dataset_single_mask(args, stage="nuscenes", split="train", skip=1, num_prompt_points=32, num_object_points=5, overfit=False,
