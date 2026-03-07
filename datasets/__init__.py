@@ -250,5 +250,19 @@ def build_dataset_single_mask(args, stage="nuscenes", split="train", skip=1, num
             overfit=overfit,
             use_centroid=use_centroid
         )
+    elif stage == "seg2tunnel":
+        dataset = Seg2TunnelDataset(
+            split=split,
+            data_root=args.data_root,
+            transform=args.data[split]["transform"],
+            test_mode=False,
+            test_cfg=None,
+            num_prompt_points=num_prompt_points,
+            num_object_points=num_object_points,
+            overfit=overfit,
+            use_centroid=use_centroid,
+            ignore_index=0, # Matches Label 0 as background/noise
+            use_random_clicks=use_random_clicks
+        )
     
     return dataset
