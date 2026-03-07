@@ -813,7 +813,7 @@ class PointTransformerV3(PointModule):
         pdnorm_decouple=True,
         pdnorm_adaptive=False,
         pdnorm_affine=True,
-        pdnorm_domains=("Outdoor", "Indoor", "Part", "Aerial"),
+        pdnorm_domains=("Outdoor", "Indoor", "Part", "Aerial","Tunnel"),
         backbone_out_channels=128,
         num_points=32,
         num_merge_blocks=1,
