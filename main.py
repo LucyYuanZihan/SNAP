@@ -909,6 +909,10 @@ def setup_dataloaders(args, config_list):
             label_dict["KITTI360SS"] = val_dataset_i.class_labels()
         elif stage == "waymo":
             label_dict["Waymo"] = val_dataset_i.class_labels()
+        elif stage == "seg2tunnel":
+            label_dict["Seg2Tunnel"] = train_dataset_i.class_labels()
+
+        
         else:
             raise ValueError(f"Dataset not found: {stage}")
 
