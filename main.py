@@ -62,7 +62,7 @@ def get_args_parser():
 
     # dataset
     parser.add_argument('--checkpoint_dir', default="checkpoints/", type=str)
-    parser.add_argument('--stage', default=['kitti'], type=str, nargs='+')
+    parser.add_argument('--stage', default=['seg2tunnel'], type=str, nargs='+')
     parser.add_argument('--val_dataset', default=[''], type=str, nargs='+')
 
     # training
@@ -70,8 +70,8 @@ def get_args_parser():
     parser.add_argument('--batch_size', default=1, type=int)
     parser.add_argument('--num_workers', default=8, type=int)
     parser.add_argument('--weight_decay', default=0.005, type=float)
-    parser.add_argument('--val_freq', default=10, type=int)
-    parser.add_argument('--epochs', default=500, type=int)
+    parser.add_argument('--val_freq', default=1, type=int)
+    parser.add_argument('--epochs', default=5, type=int)
 
     # resume pretrained model or resume training
     parser.add_argument('--resume', default=None, type=str)
@@ -964,7 +964,7 @@ def get_config(args):
     if args.use_var_grid:
         from conf_input_var import semantic_kitti, nuscenes, pandaset, scannet, stpls3d, dales
     else:
-        from conf_input import semantic_kitti, nuscenes, pandaset, scannet, s3dis, scannetpp, kitti360, stpls3d, dales, kitti360full, s3disfull, replica, hm3d, matterport, urbanbis, kitti360_ss, waymo
+        from conf_input import semantic_kitti, nuscenes, pandaset, scannet, s3dis, scannetpp, kitti360, stpls3d, dales, kitti360full, s3disfull, replica, hm3d, matterport, urbanbis, kitti360_ss, waymo, seg2tunnel
 
     for stage in args.stage:
         if stage == "kitti":
@@ -1003,6 +1003,8 @@ def get_config(args):
             config_list.append(kitti360_ss)
         elif stage == "waymo":
             config_list.append(waymo)
+        elif stage == "seg2tunnel":
+            config_list.append(seg2tunnel)
         else:
             raise ValueError(f"Config file not found for stage: {stage}")
 
@@ -1125,3 +1127,6 @@ if __name__ == '__main__':
     args.local_rank = int(os.environ.get('LOCAL_RANK', 0))
 
     main(args)
+
+
+
