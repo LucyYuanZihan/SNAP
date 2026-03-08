@@ -115,7 +115,7 @@ class DemoDatset():
                     grid_size=grid_size,
                     hash_type="fnv",
                     mode="train",
-                    keys=("coord", "strength", "instance", "segment"),
+                    keys=("coord", "strength", "feat"),
                     return_grid_coord=True,
                 ),
                 dict(type="CenterShift", apply_z=False),
@@ -128,8 +128,7 @@ class DemoDatset():
                         "coord", 
                         "grid_coord", 
                         "strength", 
-                        "instance", 
-                        "segment", 
+                        "feat",
                         "condition", 
                         "domain"
                     ),
@@ -144,8 +143,7 @@ class DemoDatset():
                         "coord", 
                         "grid_coord", 
                         "strength", 
-                        "instance", 
-                        "segment", 
+                        "feat", 
                         "condition", 
                         "domain",
                         "point",
@@ -221,7 +219,7 @@ class DemoDatset():
         else:
             intensity = np.zeros((coord.shape[0], 1), dtype=np.float32)
 
-        data_dict = dict(coord=coord, color=color, normal=normal, strength=intensity)
+        data_dict = dict(coord=coord, color=color, normal=normal, strength=intensity, feat=intensity)
         data_dict = self.transform1(data_dict)
         return data_dict
     
