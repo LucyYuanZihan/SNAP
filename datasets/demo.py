@@ -15,6 +15,8 @@ class DemoDatset():
                 grid_size = 0.02
             elif domain=="Aerial":
                 grid_size = 0.33
+            elif domain=="Tunnel":
+                grid_size = 0.02
 
         if domain=="Outdoor":
             transforms_list_1 = [
@@ -103,6 +105,54 @@ class DemoDatset():
                     keys=("coord", "grid_coord", "color", "condition", "domain", "point", "text"),
                 )
             ]
+
+        elif domain=="Tunnel":
+            print("using the domain Tunnel")
+            transforms_list_1=[
+                dict(type="CenterShift", apply_z=True),
+                dict(
+                    type="GridSample",
+                    grid_size=grid_size,
+                    hash_type="fnv",
+                    mode="train",
+                    keys=("coord", "strength", "instance", "segment"),
+                    return_grid_coord=True,
+                ),
+                dict(type="CenterShift", apply_z=False),
+                dict(type="Add", keys_dict={"condition": "Seg2Tunnel"}),
+                dict(type="Add", keys_dict={"domain": domain}),
+                dict(type="ToTensor"),
+                dict(
+                    type="Collect",
+                    keys=(
+                        "coord", 
+                        "grid_coord", 
+                        "strength", 
+                        "instance", 
+                        "segment", 
+                        "condition", 
+                        "domain"
+                    ),
+                ),
+            ]
+
+            transforms_list_2 = [
+                dict(type="ToTensor"),
+                dict(
+                    type="Collect",
+                    keys=(
+                        "coord", 
+                        "grid_coord", 
+                        "strength", 
+                        "instance", 
+                        "segment", 
+                        "condition", 
+                        "domain",
+                        "point",
+                        "text"
+                    ),
+                )
+            ]
         
 
         self.transform1 = Compose(transforms_list_1)
@@ -129,7 +179,10 @@ class DemoDatset():
                'street sign', 'clutter', 'fence']
         
         self.labels_dales = ['Ground','Vegetation','Cars','Trucks','Power lines','Fences','Poles','Buildings']
-
+        self.labels_tunnel = [
+            "Key segment", "Adjacent segment left", "Standard segment left", 
+            "Standard segment middle", "Standard segment right", "Adjacent segment right"
+        ]
         self.labels = self.labels_kitti + self.labels_scannet + self.labels_stpls3d
 
         self.labels_scannet20 = ("wall", "floor", "cabinet", "bed", "chair", "sofa", "table", "door", "window", "bookshelf", "picture", "counter", "desk", "curtain", "refrigerator", "shower curtain", "toilet", "sink", "bathtub", "otherfurniture")
@@ -140,6 +193,8 @@ class DemoDatset():
             self.labels = self.labels_scannet
         elif domain=="Aerial":
             self.labels = self.labels_stpls3d + self.labels_dales
+        elif domain=="Tunnel":
+            self.labels = self.labels_tunnel
         
     
     
