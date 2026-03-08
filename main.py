@@ -46,7 +46,7 @@ def get_args_parser():
     parser.add_argument('--use_aux_loss', action='store_true', default=False)
     parser.add_argument('--use_localized_loss', action='store_true', default=False)
     parser.add_argument('--iterative', default=False, action='store_true')
-    parser.add_argument('--use_var_grid', action='store_true', default=True)
+    parser.add_argument('--use_var_grid', action='store_true', default=False)
     
     # Evaluation
     parser.add_argument('--val_only', default=False, action='store_true')
@@ -238,7 +238,7 @@ def train_epoch(args, model, clip_model, train_loader, optimizer, scheduler, sca
                     # Compute loss
                     loss, loss_dict = model.module.compute_loss(seg_logits, text_out, iou_out, sample['masks'], 
                                         text_features_dict[sample['condition'][0]], sample['mask_labels'], aux_seg_logits_list, loss_weights,
-                                        confidence_scores_list, confidence_score_gt_list, loss_weight_dict, sample['condition'][0])
+                                        confidence_scores_list, confidence_score_gt_list, None, sample['condition'][0])
                 
                 # Compute Metrics
                 with torch.no_grad():
