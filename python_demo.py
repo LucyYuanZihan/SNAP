@@ -56,6 +56,11 @@ class PointCloudData:
             pcd = o3d.geometry.PointCloud()
             pcd.points = o3d.utility.Vector3dVector(coord)
             data['color'] = pcdata[1]
+        elif filename.lower().endswith('.txt'):
+            pcdata = np.loadtxt(filename)
+            pcd = o3d.geometry.PointCloud()
+            pcd.points = o3d.utility.Vector3dVector(pcdata[:, :3])
+            data["intensity"] = pcdata[:, 3].reshape(-1, 1)
 
         else:
             # Check if path is a directory
@@ -286,26 +291,102 @@ class SegmentationModel:
         # Show the plotter
         plotter.show()
 
+    def save_for_cloudcompare(self, point_cloud_data, masks, text_labels, iou_scores, centroid, output_path="test_results.txt"):
+        # Shift the coordinates back to their original position using the centroid
+        coords = point_cloud_data['coord'].cpu().numpy() + centroid
+        num_points = coords.shape[0]
+
+        # THE SCORECARD: Rows = points, Columns = 7 possible labels (0 through 6)
+        point_votes = np.zeros((num_points, 7))
+
+        label_map = {
+            "Key segment": 1,             
+            "Adjacent segment left": 2,
+            "Standard segment left": 3,  # Adjusted to match your new seg2tunnel.py config
+            "Standard segment middle": 4,
+            "Standard segment right": 5,
+            "Adjacent segment right": 6
+        }
+
+        print("Filtering best masks using maximum confidence scoring...")
+        for i in range(len(masks)):
+            mask = masks[i] 
+            label_idx = label_map.get(text_labels[i], 0)
+            score = float(np.squeeze(iou_scores[i]))
+            
+            # Keep the highest score seen so far to resolve overlaps
+            if label_idx != 0:
+                point_votes[mask, label_idx] = np.maximum(point_votes[mask, label_idx], score)
+
+        # Find the winning label for every point
+        final_labels = np.argmax(point_votes, axis=1).reshape(-1, 1)
+
+        export_data = np.hstack((coords, final_labels))
+        np.savetxt(output_path, export_data, fmt='%.6f %.6f %.6f %d', 
+                   header="X Y Z Label", comments='')
+        print(f"Saved MAXIMUM-CONFIDENCE results to {output_path}")
+
 
 if __name__ == "__main__":
-    # Load the point cloud data
+    # 1. Load your tunnel point cloud data
     point_cloud = PointCloudData()
-    point_cloud_data = point_cloud.load_point_cloud("data_examples/KITTI/000000.bin")
+    test_file = "/mnt/c/Users/zy349/Documents/Points2NeRF/Seg2Tunnel/Normalised/test/1-5-264.txt" 
+    point_cloud_data = point_cloud.load_point_cloud(test_file)
 
-    # Load the model
-    model = SegmentationModel(checkpoint_path="/home/thor/Projects/Lidar_Segmentation/checkpoints/SNAP_aerial_outdoor_indoor_epoch_19.pth", domain="Outdoor", grid_size=0.05)
+    # ==========================================
+    # CENTERING THE TUNNEL
+    # ==========================================
+    centroid = np.mean(point_cloud_data['coord'], axis=0)
+    point_cloud_data['coord'] = point_cloud_data['coord'] - centroid
 
-    # Intialize the model and run the model backbone to extract point features
+    # 2. Load the newly trained model 
+    model = SegmentationModel(
+        checkpoint_path="checkpoints/260308_140135_seg2tunnel_training/epoch_5.pth", # <--- UPDATE THIS PATH!
+        domain="Tunnel", 
+        grid_size=0.02
+    )
+
     point_cloud_data = model.intialize_pointcloud(point_cloud_data)
     model.extract_backbone_features(point_cloud_data)
 
-    # Specify a prompt point
-    # prompt_points = [[[x1, y1, z1], [x2, y2, z2], ...]]  # List of prompt pointe, Shape -> M, P, 3 (M = number of objects, P = number of clicks on each object)
-    # The prompt points should be in the format [x, y, z] and should be in the same coordinate system as the point cloud data
-    prompt_points = [[[ 9.4854517 ,  7.34119511, -0.40044212]]]
+    # 3. Load Ground Truth to generate Oracle Prompts
+    print("Extracting Oracle Prompts from Ground Truth...")
+    orig_data = np.loadtxt(test_file)
+    
+    # We must subtract the centroid from the GT coordinates so the clicks align with the centered tunnel
+    orig_coords = orig_data[:, :3] - centroid
+    orig_labels = orig_data[:, 4].astype(int)
 
-    # Run segmentation
-    masks, text_labels, iou_scores = model.segment(point_cloud_data, prompt_points, text_prompt=None)
+    # ====================================================
+    # AUTOMATED TESTING: Loop through 1 click and 10 clicks
+    # ====================================================
+    for num_clicks in [1, 10]:
+        print(f"\n{'='*50}")
+        print(f"RUNNING EVALUATION WITH {num_clicks} CLICK(S) PER SEGMENT")
+        print(f"{'='*50}")
 
-    # Visualize the results
-    model.visualize_results(point_cloud_data, masks, text_labels, iou_scores)
+        prompt_points = []
+        for class_id in range(1, 7):
+            class_pts = orig_coords[orig_labels == class_id]
+            if len(class_pts) > 0:
+                if num_clicks == 1:
+                    # Find the exact mathematical dead-center of the segment
+                    true_centroid = np.mean(class_pts, axis=0)
+                    prompt_points.append([true_centroid.tolist()])
+                else:
+                    # Randomly sample 'num_clicks' points across the segment
+                    if len(class_pts) >= num_clicks:
+                        indices = np.random.choice(len(class_pts), num_clicks, replace=False)
+                        clicks = class_pts[indices].tolist()
+                    else:
+                        clicks = class_pts.tolist() # Fallback for tiny segments
+                    prompt_points.append(clicks)
+
+        print(f"Generated {len(prompt_points)} segments with {num_clicks} click(s) each!")
+
+        # 4. Run standard segmentation 
+        masks, text_labels, iou_scores = model.segment(point_cloud_data, prompt_points, text_prompt=None)
+
+        # 5. Save the output! 
+        output_filename = f"tunnel_test_result_{num_clicks}_clicks.txt"
+        model.save_for_cloudcompare(point_cloud_data, masks, text_labels, iou_scores, centroid=centroid, output_path=output_filename)
