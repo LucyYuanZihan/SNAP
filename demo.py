@@ -8,7 +8,7 @@ from utils.torch_helpers import all_to_device
 from datasets.demo import DemoDatset
 import logging
 from tqdm import tqdm
-from conf_input import semantic_kitti_new, nuscenes_new, pandaset, scannet, s3dis, scanrefer, scannetpp, scannet_block, partnet, kitti360, stpls3d
+from conf_input import semantic_kitti, nuscenes, pandaset, scannet, s3dis, scanrefer, scannetpp, scannet_block, partnet, kitti360, stpls3d, seg2tunnel
 import numpy as np
 import pyvista as pv
 import open3d as o3d
