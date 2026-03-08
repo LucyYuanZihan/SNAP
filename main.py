@@ -236,9 +236,16 @@ def train_epoch(args, model, clip_model, train_loader, optimizer, scheduler, sca
                     seg_logits, text_out, iou_out, aux_seg_logits_list, loss_weights, confidence_scores_list, confidence_score_gt_list = model(sample, iterative=args.iterative, clicks=clicks)
 
                     # Compute loss
-                    loss, loss_dict = model.module.compute_loss(seg_logits, text_out, iou_out, sample['masks'], 
-                                        text_features_dict[sample['condition'][0]], sample['mask_labels'], aux_seg_logits_list, loss_weights,
-                                        confidence_scores_list, confidence_score_gt_list, None, sample['condition'][0])
+                    loss, loss_dict = model.module.compute_loss(
+                        seg_logits, 
+                        text_out, 
+                        iou_out, 
+                        sample['masks'], 
+                        text_features_dict[sample['condition'][0]], 
+                        sample['mask_labels'], 
+                        aux_seg_logits_list, 
+                        loss_weights
+                    )
                 
                 # Compute Metrics
                 with torch.no_grad():
