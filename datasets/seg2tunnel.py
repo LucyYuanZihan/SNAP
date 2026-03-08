@@ -45,54 +45,53 @@ class Seg2TunnelDataset(DefaultDataset_new):
         if self.overfit:
             self.data_list = self.data_list[:10]
 
-    def get_data_list(self):
-        """Get list of txt files for the dataset"""
-        split_path = os.path.join(self.data_root, self.split)
-        if not os.path.exists(split_path):
-            # Fallback in case train/val/test splits are strictly in the root directory
-            split_path = self.data_root
-            
-        data_list = sorted([f for f in os.listdir(split_path) if f.endswith('.txt')])
-        return data_list
-
     def get_data(self, idx):
-        """Load point cloud from txt file"""
+        """Load point cloud from txt file with shape safety"""
         split_path = os.path.join(self.data_root, self.split)
         if not os.path.exists(split_path):
             split_path = self.data_root
             
         txt_file = os.path.join(split_path, self.data_list[idx])
-        data = np.loadtxt(txt_file)
         
-        # ==========================================
-        # EXTREME VRAM SAVER: Random Downsampling
-        # ==========================================
-        # Applied ONLY during training to preserve validation accuracy
-        if self.split == "train":
-            max_points = 16384  
-            if len(data) > max_points:
-                indices = np.random.choice(len(data), max_points, replace=False)
-                data = data[indices]
-        # ==========================================
+        try:
+            data = np.loadtxt(txt_file)
+        except Exception as e:
+            print(f"Error loading file {txt_file}: {e}")
+            # Return a dummy small array to prevent total crash if one file is bad
+            data = np.zeros((100, 5))
 
-        coord = data[:, :3].astype(np.float32)
+        # Shape Check: Ensure data is 2D
+        if len(data.shape) == 1:
+            data = data.reshape(1, -1)
+
+        # Force exact slicing for XYZ
+        coord = data[:, 0:3].astype(np.float32) 
         
-        # [FIX 1]: Cleaned up intensity duplication logic
+        # 1-Channel Intensity (Matches your SNAP intensity_encoder)
         raw_intensity = data[:, 3:4].astype(np.float32)
-        strength = np.repeat(raw_intensity, 3, axis=1) # Now shape is (N, 3) 
+        strength = raw_intensity 
         
         segment = data[:, 4].astype(np.int32)       
-        instance = segment.copy() # Treating semantic class essentially as instance for masking logic
+        instance = segment.copy() 
         
-        # Aligned dict format: explicitly locking condition and domain
+        # VRAM Saver
+        if self.split == "train":
+            max_points = 16384  
+            if len(coord) > max_points:
+                indices = np.random.choice(len(coord), max_points, replace=False)
+                coord = coord[indices]
+                strength = strength[indices]
+                segment = segment[indices]
+                instance = instance[indices]
+        
         data_dict = dict(
-            coord=coord,
-            strength=strength,
-            feat=strength,
+            coord=coord,      # Guaranteed (N, 3)
+            strength=strength,# Guaranteed (N, 1)
+            feat=strength,    # Guaranteed (N, 1)
             segment=segment,
             instance=instance,
-            condition="Seg2Tunnel",  # Ensures correct task mapping in SNAP
-            domain="Tunnel"          # Natively bypasses the PTV3 AssertionError
+            condition="Seg2Tunnel",
+            domain="Tunnel"
         )
         return data_dict
 
