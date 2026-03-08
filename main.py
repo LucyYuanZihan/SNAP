@@ -46,19 +46,19 @@ def get_args_parser():
     parser.add_argument('--use_aux_loss', action='store_true', default=False)
     parser.add_argument('--use_localized_loss', action='store_true', default=False)
     parser.add_argument('--iterative', default=False, action='store_true')
-    parser.add_argument('--use_var_grid', action='store_true', default=False)
+    parser.add_argument('--use_var_grid', action='store_true', default=True)
     
     # Evaluation
     parser.add_argument('--val_only', default=False, action='store_true')
     parser.add_argument('--compute_ap', default=False, action='store_true')
-    parser.add_argument('--return_class_wise', action='store_true', default=False)
+    parser.add_argument('--return_class_wise', action='store_true', default=True)
     parser.add_argument('--use_centroid', action='store_true', default=False)
     parser.add_argument('--run_openvocab_eval', action="store_true", default=False)
-    parser.add_argument('--compute_PQ', action="store_true", default=False)
+    parser.add_argument('--compute_PQ', action="store_true", default=True)
     parser.add_argument('--PQ_refer_labels', action="store_true", default=False)
     parser.add_argument('--compute_NOC', action="store_true", default=False)
     parser.add_argument('--exclude_wall_floor', default=False, action='store_true')
-    parser.add_argument('--get_confusion', default=False, action='store_true')
+    parser.add_argument('--get_confusion', default=True, action='store_true')
 
     # dataset
     parser.add_argument('--checkpoint_dir', default="checkpoints/", type=str)
