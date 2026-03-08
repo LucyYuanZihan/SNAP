@@ -45,6 +45,14 @@ class Seg2TunnelDataset(DefaultDataset_new):
         if self.overfit:
             self.data_list = self.data_list[:10]
 
+    def get_data_list(self):
+        """Get list of txt files for the dataset"""
+        split_path = os.path.join(self.data_root, self.split)
+        if not os.path.exists(split_path):
+            split_path = self.data_root
+            
+        data_list = sorted([f for f in os.listdir(split_path) if f.endswith('.txt')])
+        return data_list
     def get_data(self, idx):
         """Load point cloud from txt file with shape safety"""
         split_path = os.path.join(self.data_root, self.split)
@@ -186,7 +194,7 @@ class Seg2TunnelDataset(DefaultDataset_new):
             coord=coord, 
             grid_coord=grid_coord, 
             strength=strength, 
-            feat=strength,  # [FIX 2]: CRITICAL - Feeds the 3-channel intensity to the network
+            feat=strength, 
             point=torch.from_numpy(prompt_points).float(), 
             condition=condition, 
             domain=domain,
@@ -204,11 +212,11 @@ class Seg2TunnelDataset(DefaultDataset_new):
         S1-S6 definitions for evaluation and visualization.
         """
         class_labels = {
-            0: "Key segment ",
-            1: "Adjacent segment left ",
-            2: "Standard segment left ",
-            3: "Standard segment middle ",
-            4: "Standard segment right ",
-            5: "Adjacent segment right ",
+            0: "Key segment",
+            1: "Adjacent segment left",
+            2: "Standard segment left",
+            3: "Standard segment middle",
+            4: "Standard segment right",
+            5: "Adjacent segment right",
         }
         return class_labels
