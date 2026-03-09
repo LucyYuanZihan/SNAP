@@ -224,7 +224,7 @@ class SegmentationModel:
 
             # Get text encoding for the text prompt
             if text_prompt:
-                print(text_prompt)
+                print(f"Text prompt: {text_prompt}")
                 tokenized_text_prompt = clip.tokenize(text_prompt).to(self.device)
                 text_features = self.clip_model.encode_text(tokenized_text_prompt)
 
@@ -313,6 +313,8 @@ class SegmentationModel:
         print("Filtering best masks using maximum confidence scoring...")
         for i in range(len(masks)):
             mask = masks[i] 
+            if np.sum(mask) == 0:
+                continue
             label_idx = label_map.get(text_labels[i], 0)
             score = float(np.squeeze(iou_scores[i]))
             
@@ -344,47 +346,16 @@ if __name__ == "__main__":
         grid_size=0.02
     )
 
-    point_cloud_data, centroid = model.intialize_pointcloud(point_cloud_data)
+    point_cloud_data, internal_centroid = model.intialize_pointcloud(point_cloud_data)
     model.extract_backbone_features(point_cloud_data)
 
-    # 3. Load Ground Truth to generate Oracle Prompts
-    print("Extracting Oracle Prompts from Ground Truth...")
-    orig_data = np.loadtxt(test_file)
-    
-    # We must subtract the centroid from the GT coordinates so the clicks align with the centered tunnel
-    orig_coords = orig_data[:, :3] - centroid
-    orig_labels = orig_data[:, 4].astype(int)
+    coords = point_cloud_data['coord'].cpu().numpy()
 
-    # ====================================================
-    # AUTOMATED TESTING: Loop through 1 click and 10 clicks
-    # ====================================================
-    for num_clicks in [1, 10]:
-        print(f"\n{'='*50}")
-        print(f"RUNNING EVALUATION WITH {num_clicks} CLICK(S) PER SEGMENT")
-        print(f"{'='*50}")
+    prompt_points = [[[x,y,z]] for x,y,z in coords] # Create a prompt point for every point in the cloud
+    print(f"Preparing to run {len(prompt_points)} 1-click tests...")
 
-        prompt_points = []
-        for class_id in range(1, 7):
-            class_pts = orig_coords[orig_labels == class_id]
-            if len(class_pts) > 0:
-                if num_clicks == 1:
-                    # Find the exact mathematical dead-center of the segment
-                    true_centroid = np.mean(class_pts, axis=0)
-                    prompt_points.append([true_centroid.tolist()])
-                else:
-                    # Randomly sample 'num_clicks' points across the segment
-                    if len(class_pts) >= num_clicks:
-                        indices = np.random.choice(len(class_pts), num_clicks, replace=False)
-                        clicks = class_pts[indices].tolist()
-                    else:
-                        clicks = class_pts.tolist() # Fallback for tiny segments
-                    prompt_points.append(clicks)
+    masks, text_labels, iou_scores = model.segment(point_cloud_data, prompt_points, text_prompt=None)
 
-        print(f"Generated {len(prompt_points)} segments with {num_clicks} click(s) each!")
-
-        # 4. Run standard segmentation 
-        masks, text_labels, iou_scores = model.segment(point_cloud_data, prompt_points, text_prompt=None)
-
-        # 5. Save the output! 
-        output_filename = f"tunnel_test_result_{num_clicks}_clicks_100pth.txt"
-        model.save_for_cloudcompare(point_cloud_data, masks, text_labels, iou_scores, centroid=centroid, output_path=output_filename)
+    # 5. Save the output! 
+    output_filename = "tunnel_test_result_all_points_100pth.txt"
+    model.save_for_cloudcompare(point_cloud_data, masks, text_labels, iou_scores, centroid=internal_centroid, output_path=output_filename)
