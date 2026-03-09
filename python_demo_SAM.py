@@ -47,6 +47,13 @@ class PointCloudData:
             data['intensity'] = np.expand_dims(np.asarray(pcdata.values[valid_idxs][:, 3])/255.0, 1)
             print("Intensity data found")
             print("Min and max are: ", data["intensity"].min(), data["intensity"].max())
+        elif filename.lower().endswith('.txt'): # Seg2Tunnel format
+            pcdata = np.loadtxt(filename, dtype=np.float32)
+            pcd = o3d.geometry.PointCloud()
+            pcd.points = o3d.utility.Vector3dVector(pcdata[:, :3])
+            # Assuming column 3 is intensity, based on your seg2tunnel.py
+            data["intensity"] = pcdata[:, 3].reshape(-1, 1) 
+            print("TXT data found and loaded successfully!")
         elif filename.lower().endswith('.pth'):
             pcdata = torch.load(filename)
             coord = pcdata[0]
@@ -56,11 +63,6 @@ class PointCloudData:
             pcd = o3d.geometry.PointCloud()
             pcd.points = o3d.utility.Vector3dVector(coord)
             data['color'] = pcdata[1]
-        elif filename.lower().endswith('.txt'):
-            pcdata = np.loadtxt(filename)
-            pcd = o3d.geometry.PointCloud()
-            pcd.points = o3d.utility.Vector3dVector(pcdata[:, :3])
-            data["intensity"] = pcdata[:, 3].reshape(-1, 1)
 
         else:
             # Check if path is a directory
@@ -103,6 +105,7 @@ class SegmentationModel:
 
         # Initialize the datset class
         self.dataset = DemoDatset(domain=self.domain, grid_size=grid_size)
+        print(f"DEBUG: Model is using these labels: {self.dataset.labels}")
 
         # Initialize the segmentation model
         self.model = SNAP(num_points=1, num_merge_blocks=1, use_pdnorm=True, return_mid_points=True).to(self.device)
@@ -140,9 +143,8 @@ class SegmentationModel:
 
         # Process the point cloud data
         data = self.dataset.process_data(coord, color, normal, intensity)
-        internal_centroid = np.mean(coord, axis=0)
 
-        return data, internal_centroid
+        return data
     
     def extract_backbone_features(self, data):
         # Put the model in eval mode
@@ -171,12 +173,13 @@ class SegmentationModel:
     def segment_everything(self, data):
         # Cluster the mid points to reduce the number of prompt points -> This will ensure that there are not a lot of points on the same object
         # 1. Use HDBSCAN to cluster the mid points
-        if self.domain == 'Outdoor':
+        # if self.domain == 'Outdoor':
+        if self.domain in ['Outdoor', 'Tunnel']:
             # Make the prompt points using the mid points
             prompt_points = self.point_features['coord'].cpu().numpy()
             print("Mid points shape: ", prompt_points.shape)
 
-            clusterer = hdbscan.HDBSCAN(min_cluster_size=50, min_samples=50, cluster_selection_epsilon=0.1)
+            clusterer = hdbscan.HDBSCAN(min_cluster_size=15, min_samples=15, cluster_selection_epsilon=0.02)
             cluster_labels = clusterer.fit_predict(prompt_points)
             unique_labels = np.unique(cluster_labels)
             print("Number of clusters: ", len(unique_labels))
@@ -242,8 +245,7 @@ class SegmentationModel:
                     data_dict["point"] = data['point'][i].unsqueeze(0)
 
                     mask_logits, text_out, iou_out, _, _, _, _ = self.model.run_mask_decoder(self.point_features, data_dict)
-                    masks.append(mask_logits[0].sigmoid().squeeze().cpu().numpy() > 0.2)
-                    print(f"   -> Mask contains {np.sum(mask_logits[0].sigmoid().squeeze().cpu().numpy() > 0.2)} points.")
+                    masks.append(mask_logits[0].sigmoid().squeeze().cpu().numpy() > 0.1)
                    
                     # Get the text output
                     label, score = self.get_text_label(text_features_vocab, text_out[0], self.dataset.labels)
@@ -252,6 +254,27 @@ class SegmentationModel:
                     print(f"Label: {label}, IOU: {iou_out[0]} Score: {score}")
 
         return masks, text_out_list, iou_out_list
+
+    def save_for_cloudcompare(self, point_cloud_data, masks, text_labels, output_path="test_results.txt"):
+        coords = point_cloud_data['coord'].cpu().numpy()
+        # Initialize labels as 0 (Unclassified)
+        final_labels = np.zeros((coords.shape[0], 1))
+
+        # Assign a unique integer ID to each segmented mask
+        for i, mask in enumerate(masks):
+            # Class 1, 2, 3... based on your self.labels index
+            label_idx = self.dataset.labels.index(text_labels[i]) + 1
+            final_labels[mask] = label_idx
+            print(f"Exporting {text_labels[i]} as Label ID: {label_idx}")
+
+        # Combine: X, Y, Z, Label
+        export_data = np.hstack((coords, final_labels))
+        
+        # Save as a space-separated text file
+        np.savetxt(output_path, export_data, fmt='%.6f %.6f %.6f %d', 
+                   header="X Y Z Label", comments='')
+        print(f"Saved results for CloudCompare to {output_path}")
+
 
     def visualize_results(self, point_cloud_data, masks, text_labels, iou_scores):
         ## Visualize results using PyVista
@@ -269,6 +292,10 @@ class SegmentationModel:
         for i, mask in enumerate(masks):
             # Get the points for the mask
             mask_points = point_cloud_data['coord'][mask]
+            # --- ADD THIS CHECK ---
+            if len(mask_points) == 0:
+                print(f"Skipping empty mask {i}")
+                continue
             # Create a PyVista mesh for the mask
             mask_mesh = pv.PolyData(mask_points.cpu().numpy())
             # Make the mask color red
@@ -293,98 +320,75 @@ class SegmentationModel:
         # Show the plotter
         plotter.show()
 
-    def save_for_cloudcompare(self, point_cloud_data, masks, text_labels, iou_scores, centroid, output_path="test_results.txt"):
-        # Shift the coordinates back to their original position using the centroid
-        coords = point_cloud_data['coord'].cpu().numpy() + centroid
-        num_points = coords.shape[0]
 
-        # THE SCORECARD: Rows = points, Columns = 7 possible labels (0 through 6)
-        point_votes = np.zeros((num_points, 7))
+'''if __name__ == "__main__":
+    # Load the point cloud data
+    point_cloud = PointCloudData()
+    point_cloud_data = point_cloud.load_point_cloud("data_examples/KITTI/000000.bin")
 
-        label_map = {
-            "Key segment": 1,             
-            "Adjacent segment left": 2,
-            "Standard segment left": 3,  # Adjusted to match your new seg2tunnel.py config
-            "Standard segment middle": 4,
-            "Standard segment right": 5,
-            "Adjacent segment right": 6
-        }
+    # Load the model
+    model = SegmentationModel(checkpoint_path="/home/thor/Projects/Lidar_Segmentation/checkpoints/SNAP_aerial_outdoor_indoor_epoch_19.pth", domain="Outdoor", grid_size=0.05)
 
-        print("Filtering best masks using maximum confidence scoring...")
-        for i in range(len(masks)):
-            mask = masks[i] 
-            label_idx = label_map.get(text_labels[i], 0)
-            score = float(np.squeeze(iou_scores[i]))
-            
-            # Keep the highest score seen so far to resolve overlaps
-            if label_idx != 0:
-                point_votes[mask, label_idx] = np.maximum(point_votes[mask, label_idx], score)
+    # Intialize the model and run the model backbone to extract point features
+    point_cloud_data = model.intialize_pointcloud(point_cloud_data)
+    model.extract_backbone_features(point_cloud_data)
 
+    # Specify a prompt point
+    # prompt_points = [[[x1, y1, z1], [x2, y2, z2], ...]]  # List of prompt pointe, Shape -> M, P, 3 (M = number of objects, P = number of clicks on each object)
+    # The prompt points should be in the format [x, y, z] and should be in the same coordinate system as the point cloud data
+    prompt_points = [[[ 9.4854517 ,  7.34119511, -0.40044212]]]
 
+    # Run segmentation
+    masks, text_labels, iou_scores = model.segment(point_cloud_data, prompt_points, text_prompt=None)
 
-        # Find the winning label for every point
-        final_labels = np.argmax(point_votes, axis=1).reshape(-1, 1)
-
-        export_data = np.hstack((coords, final_labels))
-        np.savetxt(output_path, export_data, fmt='%.6f %.6f %.6f %d', 
-                   header="X Y Z Label", comments='')
-        print(f"Saved MAXIMUM-CONFIDENCE results to {output_path}")
-
+    # Visualize the results
+    model.visualize_results(point_cloud_data, masks, text_labels, iou_scores)'''
 
 if __name__ == "__main__":
     # 1. Load your tunnel point cloud data
     point_cloud = PointCloudData()
-    test_file = "/mnt/c/Users/zy349/Documents/Points2NeRF/Seg2Tunnel/Normalised/test/1-5-264.txt" 
+    
+    # Pick ANY .txt file from your validation folder
+    test_file = "/mnt/c/Users/zy349/Documents/Points2NeRF/Seg2Tunnel/Normalised/test/1-5-264.txt" # Change this to a real filename in your val folder!
     point_cloud_data = point_cloud.load_point_cloud(test_file)
 
-    # 2. Load the newly trained model 
+    # 2. Load the model using your specific Epoch 5 weights
     model = SegmentationModel(
-        checkpoint_path="checkpoints/260308_170651_seg2tunnel_training/epoch_100.pth", 
+        # checkpoint_path="/home/zy349/SNAP/checkpoints/260304_202434_tunnel_extreme_vram_save/epoch_100.pth",
+        checkpoint_path="checkpoints/260308_170651_seg2tunnel_training/epoch_100.pth",
         domain="Tunnel", 
         grid_size=0.02
     )
 
-    point_cloud_data, centroid = model.intialize_pointcloud(point_cloud_data)
+    '''# Initialize the model and run the model backbone to extract point features
+    point_cloud_data = model.intialize_pointcloud(point_cloud_data)
     model.extract_backbone_features(point_cloud_data)
 
-    # 3. Load Ground Truth to generate Oracle Prompts
-    print("Extracting Oracle Prompts from Ground Truth...")
-    orig_data = np.loadtxt(test_file)
-    
-    # We must subtract the centroid from the GT coordinates so the clicks align with the centered tunnel
-    orig_coords = orig_data[:, :3] - centroid
-    orig_labels = orig_data[:, 4].astype(int)
+    # 3. Specify a prompt point (The "Click")
+    # Open the .txt file you chose above, look at the first row, and copy the first 3 numbers (X, Y, Z) here:
+    # Multiple points for the SAME object to improve accuracy
+    prompt_points = [[ 
+        [-0.161381, -0.436889, -0.530718]
+    ]]
 
-    # ====================================================
-    # AUTOMATED TESTING: Loop through 1 click and 10 clicks
-    # ====================================================
-    for num_clicks in [1, 10]:
-        print(f"\n{'='*50}")
-        print(f"RUNNING EVALUATION WITH {num_clicks} CLICK(S) PER SEGMENT")
-        print(f"{'='*50}")
+    # 4. Run segmentation
+    masks, text_labels, iou_scores = model.segment(point_cloud_data, prompt_points, text_prompt=None)
 
-        prompt_points = []
-        for class_id in range(1, 7):
-            class_pts = orig_coords[orig_labels == class_id]
-            if len(class_pts) > 0:
-                if num_clicks == 1:
-                    # Find the exact mathematical dead-center of the segment
-                    true_centroid = np.mean(class_pts, axis=0)
-                    prompt_points.append([true_centroid.tolist()])
-                else:
-                    # Randomly sample 'num_clicks' points across the segment
-                    if len(class_pts) >= num_clicks:
-                        indices = np.random.choice(len(class_pts), num_clicks, replace=False)
-                        clicks = class_pts[indices].tolist()
-                    else:
-                        clicks = class_pts.tolist() # Fallback for tiny segments
-                    prompt_points.append(clicks)
+    # 5. Visualize the results
+    model.visualize_results(point_cloud_data, masks, text_labels, iou_scores)
+    # Run segmentation
+    masks, text_labels, iou_scores = model.segment(point_cloud_data, prompt_points, text_prompt=None)
 
-        print(f"Generated {len(prompt_points)} segments with {num_clicks} click(s) each!")
+    # Save instead of visualizing
+    model.save_for_cloudcompare(point_cloud_data, masks, text_labels, "tunnel_test_result.txt")'''
 
-        # 4. Run standard segmentation 
-        masks, text_labels, iou_scores = model.segment(point_cloud_data, prompt_points, text_prompt=None)
+    # Initialize the model and run the model backbone to extract point features
+    point_cloud_data = model.intialize_pointcloud(point_cloud_data)
+    model.extract_backbone_features(point_cloud_data)
 
-        # 5. Save the output! 
-        output_filename = f"tunnel_test_result_{num_clicks}_clicks_100pth.txt"
-        model.save_for_cloudcompare(point_cloud_data, masks, text_labels, iou_scores, centroid=centroid, output_path=output_filename)
+    # 3. RUN SEGMENT EVERYTHING (No manual clicks needed!)
+    print("Auto-generating prompt points and segmenting the entire tunnel...")
+    masks, text_labels, iou_scores, used_prompts = model.segment_everything(point_cloud_data)
+
+    # 4. Save for CloudCompare
+    model.save_for_cloudcompare(point_cloud_data, masks, text_labels, "tunnel_test_result_1-5-264_100pth.txt")
