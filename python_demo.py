@@ -205,7 +205,7 @@ class SegmentationModel:
 
         return masks, text_out_list, iou_out_list, prompt_points
 
-    def segment(self, data, prompt_points, text_prompt):
+    '''def segment(self, data, prompt_points, text_prompt):
         ## Need to create a custom dataloader for the point cloud data with a custom config file
         # 1. This only takes input the pointcloud and gets coord, grid_coord, feat and offset out
         # 2. This sample data needs to be passed to the model to generate the masks in an iterative manner for each prompt
@@ -216,6 +216,8 @@ class SegmentationModel:
         masks = []
         text_out_list = []
         iou_out_list = []
+
+        
         for idx in range(len(prompt_points)):
             print("Runing for prompt: ", idx)
             # Process the point cloud data
@@ -251,7 +253,59 @@ class SegmentationModel:
                     iou_out_list.append(iou_out[0][0].cpu().numpy())
                     print(f"Label: {label}, IOU: {iou_out[0]} Score: {score}")
 
+        return masks, text_out_list, iou_out_list'''
+
+    def segment(self, data, prompt_points, text_prompt):
+        masks = []
+        text_out_list = []
+        iou_out_list = []
+        
+        print("Pre-computing CLIP text embeddings to save memory...")
+        # 1. MOVED OUTSIDE THE LOOP: Calculate text features ONLY ONCE
+        text_inputs_vocab = torch.cat([clip.tokenize(f"segment {c}") for c in self.dataset.labels]).to(self.device)
+        with torch.no_grad():
+            text_features_vocab = self.clip_model.encode_text(text_inputs_vocab)
+
+        if text_prompt:
+            tokenized_text_prompt = clip.tokenize(text_prompt).to(self.device)
+            with torch.no_grad():
+                text_features = self.clip_model.encode_text(tokenized_text_prompt)
+
+        for idx in range(len(prompt_points)):
+            # Process the point cloud data
+            prompt_points_array = np.expand_dims(np.array(prompt_points[idx]), 0)
+            current_data = self.dataset.process_prompts(data.copy(), prompt_points_array, text_prompt)
+
+            # Extract masks for each prompt
+            current_data = all_to_device(current_data, self.device)
+            current_data["point_offset"] = [current_data['point'].shape[0]]
+            
+            with torch.no_grad():
+                for i in range(len(current_data['point'])):
+                    data_dict = current_data.copy()
+                    data_dict["point"] = current_data['point'][i].unsqueeze(0)
+
+                    mask_logits, text_out, iou_out, _, _, _, _ = self.model.run_mask_decoder(self.point_features, data_dict)
+                    
+                    mask_bool = mask_logits[0].sigmoid().squeeze().cpu().numpy() > 0.3 # THRESHOLD AT 0.3
+                    masks.append(mask_bool)
+                   
+                    # Get the text output using the pre-calculated text_features_vocab
+                    label, score = self.get_text_label(text_features_vocab, text_out[0], self.dataset.labels)
+                    text_out_list.append(label)
+                    iou_out_list.append(iou_out[0][0].cpu().numpy())
+                    
+                    if idx % 100 == 0:
+                        print(f"Processed prompt {idx}/{len(prompt_points)}... -> Mask points: {np.sum(mask_bool)}, Label: {label}")
+            
+            # 2. CLEAR THE TRASH: Free up GPU VRAM every 500 prompts to prevent crashes
+            if idx % 500 == 0 and idx > 0:
+                torch.cuda.empty_cache()
+
         return masks, text_out_list, iou_out_list
+
+
+    
 
     def visualize_results(self, point_cloud_data, masks, text_labels, iou_scores):
         ## Visualize results using PyVista
@@ -357,5 +411,5 @@ if __name__ == "__main__":
     masks, text_labels, iou_scores = model.segment(point_cloud_data, prompt_points, text_prompt=None)
 
     # 5. Save the output! 
-    output_filename = "tunnel_test_result_all_points_100pth.txt"
+    output_filename = "tunnel_test_result_all_points_100pth_clear.txt"
     model.save_for_cloudcompare(point_cloud_data, masks, text_labels, iou_scores, centroid=internal_centroid, output_path=output_filename)
